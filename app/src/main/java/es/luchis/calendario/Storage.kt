@@ -21,7 +21,7 @@ abstract class CalendarDatabase : RoomDatabase() { abstract fun snapshots(): Sna
 class Repository private constructor(val context: Context) {
     private val db = Room.databaseBuilder(context,CalendarDatabase::class.java,"lucia.db").build()
     val prefs = context.getSharedPreferences("backup",Context.MODE_PRIVATE)
-    fun read(): CalendarData = db.snapshots().read()?.let { decode(it.json) } ?: CalendarData()
+    fun read(): CalendarData = db.snapshots().read()?.let { decode(it.json) } ?: initialCalendar()
     fun encode(d: CalendarData): String = BackupCodec.encode(d)
     fun decode(json: String): CalendarData = BackupCodec.decode(json)
     fun save(d: CalendarData) { CalendarEngine.validate(d); db.snapshots().write(Snapshot(json=encode(d))) }
