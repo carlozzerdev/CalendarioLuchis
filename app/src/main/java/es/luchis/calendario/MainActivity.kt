@@ -126,17 +126,36 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
             ) {
                 val tabs = listOf(
                     Triple(0, "Calendario", Icons.Outlined.CalendarMonth),
-                    Triple(3, "Citas", Icons.Outlined.Event),
+                    Triple(3, "Eventos", Icons.Outlined.Event),
                     Triple(1, "Normas", Icons.Outlined.Rule),
                     Triple(2, "Ajustes", Icons.Outlined.Settings)
                 )
                 tabs.forEach { (id, title, icon) ->
-                    NavigationBarItem(selected = tab == id, onClick = { tab = id }, icon = { Icon(icon, null) }, label = { Text(title) })
+                    val colors = MaterialTheme.colorScheme
+                    NavigationBarItem(
+                        selected = tab == id, onClick = { tab = id }, icon = { Icon(icon, null) }, label = { Text(title) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = colors.primary,
+                            selectedTextColor = colors.primary,
+                            indicatorColor = lerp(colors.surface, colors.primary, 0.17f)
+                        )
+                    )
                 }
             } }) { padding ->
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    if(undo!=null) Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically) { Text("Cambio guardado",Modifier.weight(1f),style=MaterialTheme.typography.labelMedium); TextButton(onClick={ val previous=undo!!; undo=null; save(previous) }) { Text("Deshacer") } }
+                    undo?.let { previous ->
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CloudDone, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Cambios guardados", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                            TextButton(onClick = { undo = null; save(previous) }) {
+                                Icon(Icons.Outlined.Undo, null, Modifier.size(17.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Deshacer")
+                            }
+                        }
+                    }
                     when(tab) {
                         0 -> CalendarScreen(d,::save,::requestNotifications)
                         1 -> RulesScreen(d,::save)
@@ -211,6 +230,10 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
     var editDay by remember { mutableStateOf(false) }
     var entry by remember { mutableStateOf<Entry?>(null) }
     var listNotices by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var showFixed by rememberSaveable { mutableStateOf(false) }
+    var custodyFilter by rememberSaveable { mutableIntStateOf(0) }
+    var eventFilter by rememberSaveable { mutableIntStateOf((1 shl EntryKind.entries.size) - 1) }
+    val visibleKinds = EntryKind.entries.filter { eventFilter and (1 shl it.ordinal) != 0 }.toSet()
     val today = LocalDate.now()
     val ym = YearMonth.parse(month)
     val date = selected?.let(LocalDate::parse) ?: today
@@ -234,45 +257,68 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
     val dark = colors.surface.luminance() < 0.5f
     val accent = if (dark) Color(0xFFFFB58A) else Color(0xFFAE4713)
     val custodyColor = Color(d.displayColor)
-    val header = lerp(colors.surface, Color(0xFF67C6F0), if (dark) 0.18f else 0.21f)
     val cardColor = if (dark) colors.surfaceContainer else Color.White
     Column(
         Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Column(Modifier.fillMaxWidth().background(header).padding(horizontal = 6.dp, vertical = 2.dp)) {
+        Column(Modifier.fillMaxWidth().background(cardColor).padding(horizontal = 6.dp, vertical = 2.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { month = ym.minusMonths(1).toString() }) {
-                    Icon(Icons.Outlined.ChevronLeft, "Mes anterior", Modifier.background(cardColor, RoundedCornerShape(9.dp)).padding(4.dp))
+                IconButton(onClick = { month = ym.minusMonths(1).toString() }, modifier = Modifier.width(40.dp)) {
+                    Icon(Icons.Outlined.ChevronLeft, "Mes anterior", Modifier.border(1.dp, colors.outlineVariant, RoundedCornerShape(9.dp)).padding(4.dp))
                 }
                 Text(
                     ym.format(DateTimeFormatter.ofPattern("MMMM yyyy", spanish)).replaceFirstChar { it.uppercase() },
                     Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                IconButton(onClick = { month = ym.plusMonths(1).toString() }) {
-                    Icon(Icons.Outlined.ChevronRight, "Mes siguiente", Modifier.background(cardColor, RoundedCornerShape(9.dp)).padding(4.dp))
+                IconButton(onClick = { month = ym.plusMonths(1).toString() }, modifier = Modifier.width(40.dp)) {
+                    Icon(Icons.Outlined.ChevronRight, "Mes siguiente", Modifier.border(1.dp, colors.outlineVariant, RoundedCornerShape(9.dp)).padding(4.dp))
+                }
+                IconButton(onClick = { month = YearMonth.from(today).toString(); selected = null; agenda = false }, modifier = Modifier.width(40.dp)) {
+                    Icon(Icons.Outlined.Today, "Ir a hoy", Modifier.border(1.dp, colors.outlineVariant, RoundedCornerShape(9.dp)).padding(4.dp))
                 }
                 IconButton(onClick = { listNotices = false }) {
-                    Icon(Icons.Outlined.Add, "Citas", Modifier.background(accent, RoundedCornerShape(9.dp)).padding(5.dp), tint = if (dark) Color(0xFF351405) else Color.White)
+                    Icon(Icons.Outlined.Add, "Añadir o gestionar eventos", Modifier.background(colors.primary, RoundedCornerShape(12.dp)).padding(7.dp), tint = colors.onPrimary)
                 }
             }
             if (!agenda) {
-                Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(9.dp).background(custodyColor, RoundedCornerShape(3.dp)))
-                        Text("Con hijos", style = MaterialTheme.typography.labelMedium)
+                val periodIcons = listOf(Icons.Outlined.People, Icons.Outlined.WbTwilight, Icons.Outlined.LightMode, Icons.Outlined.Bedtime)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    (listOf("Hijos") + periodNames).forEachIndexed { index, label ->
+                        val active = custodyFilter == index
+                        val shape = RoundedCornerShape(50)
+                        Row(
+                            Modifier.weight(1f).heightIn(min = 36.dp).clip(shape)
+                                .background(if (active) lerp(cardColor, colors.primary, 0.20f) else colors.surface)
+                                .border(1.dp, lerp(cardColor, colors.primary, 0.18f), shape)
+                                .toggleable(active, role = Role.RadioButton) { if (it) custodyFilter = index else custodyFilter = 0 }
+                                .padding(horizontal = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(periodIcons[index], null, Modifier.size(15.dp), tint = if (index in 1..2) accent else colors.primary)
+                            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                    Text("M mañana · T tarde · N noche", style = MaterialTheme.typography.bodySmall)
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     EntryKind.entries.forEach { kind ->
                         val width = if (kind == EntryKind.REMINDER) 1.4f else 1f
-                        Row(Modifier.weight(width), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            EntryDot(kind, 10.dp, showMark = true)
+                        val checked = kind in visibleKinds
+                        Row(
+                            Modifier.weight(width).heightIn(min = 35.dp).toggleable(checked, role = Role.Checkbox) {
+                                eventFilter = eventFilter xor (1 shl kind.ordinal)
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                                null, Modifier.size(16.dp), tint = if (checked) colors.primary else colors.onSurfaceVariant)
+                            EntryDot(kind, 7.dp)
                             Text(kind.plural, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -280,7 +326,7 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
             }
         }
         if(!agenda) {
-            val weekdayLabels = listOf("L", "M", "X", "J", "V", "S", "D")
+            val weekdayLabels = listOf("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
             Row(Modifier.padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 weekdayLabels.forEachIndexed { index, label -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Text(label, style = MaterialTheme.typography.labelMedium,
@@ -304,7 +350,8 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                                 val inMonth = YearMonth.from(day) == ym
                                 CalendarDayCard(
                                     day = day,
-                                    mask = if (inMonth) CalendarEngine.day(d, day).mask else 0,
+                                    mask = if (!inMonth) 0 else CalendarEngine.day(d, day).mask and
+                                        (if (custodyFilter == 0) 7 else 1 shl (custodyFilter - 1)),
                                     custodyColor = custodyColor,
                                     cardColor = cardColor,
                                     inMonth = inMonth,
@@ -312,7 +359,8 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                                     today = day == today,
                                     periodSize = periodSize,
                                     eventRowWidth = eventRowWidth,
-                                    entryKinds = if (inMonth) entriesByDay[day].orEmpty().map { it.entry.kind }.toSet() else emptySet(),
+                                    entryKinds = if (inMonth) entriesByDay[day].orEmpty().map { it.entry.kind }
+                                        .filter { it in visibleKinds }.toSet() else emptySet(),
                                     modifier = Modifier.weight(1f).fillMaxHeight()
                                 ) {
                                     month = YearMonth.from(day).toString()
@@ -322,8 +370,9 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                             }
                         }
                     }
-                    if (fixedEntries.isNotEmpty()) FixedEvents(fixedEntries) { entry = it }
-                    SelectedDayEvents(date, today, dayEntries.filterNot { it.entry.isFixed }) { entry = it }
+                    val visibleFixed = fixedEntries.filter { it.kind in visibleKinds }
+                    if (visibleFixed.isNotEmpty()) FixedEvents(visibleFixed, { showFixed = true }) { entry = it }
+                    SelectedDayEvents(date, today, dayEntries.filter { !it.entry.isFixed && it.entry.kind in visibleKinds }) { entry = it }
                 }
             }
         } else {
@@ -333,6 +382,7 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                     TextButton(onClick = { agenda = false }) { Text("Ver mes") }
                 }
                 val entries = entriesByDay.toSortedMap().filterKeys { YearMonth.from(it) == ym }.values.flatten()
+                    .filter { it.entry.kind in visibleKinds }
                 if (entries.isEmpty()) Text("No hay elementos este mes.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 entries.forEach { occurrence -> EntryCard(occurrence.entry, occurrence.date) { entry = occurrence.entry } }
             }
@@ -340,6 +390,19 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
         if (!d.initialized && d.exceptions.isEmpty()) {
             Text("Configura el lunes inicial en Normas.", style = MaterialTheme.typography.bodySmall)
         }
+    }
+    if (showFixed && entry == null) {
+        AlertDialog(
+            onDismissRequest = { showFixed = false },
+            title = { Text("Fijados") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (fixedEntries.isEmpty()) Text("No hay elementos fijados.")
+                    fixedEntries.forEach { item -> EntryCard(item) { entry = item } }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFixed = false }) { Text("Cerrar") } }
+        )
     }
     if(editDay) DayEditor(d,date,{editDay=false},save)
     entry?.let { e -> EntryEditor(e,{entry=null},{updated -> if(updated.reminder>=0) requestNotifications(); save(d.copy(entries=d.entries.filter {it.id!=updated.id}+updated));entry=null},{save(d.copy(entries=d.entries.filter {it.id!=e.id}));entry=null}) }
@@ -532,14 +595,15 @@ private fun DayDetailsSheet(
 }
 
 @Composable
-private fun FixedEvents(entries: List<Entry>, onOpenEntry: (Entry) -> Unit) {
-    OutlinedCard(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun FixedEvents(entries: List<Entry>, onSeeAll: () -> Unit, onOpenEntry: (Entry) -> Unit) {
+    OutlinedCard(Modifier.fillMaxWidth().padding(top = 5.dp), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Outlined.PushPin, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                Text("Fijados", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text("Fijados", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onSeeAll) { Text("Ver todo →") }
             }
-            entries.forEach { item ->
+            entries.take(2).forEach { item ->
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 28.dp).clickable { onOpenEntry(item) },
                     verticalAlignment = Alignment.CenterVertically,
@@ -563,21 +627,36 @@ private fun FixedEvents(entries: List<Entry>, onOpenEntry: (Entry) -> Unit) {
 @Composable
 private fun SelectedDayEvents(date: LocalDate, today: LocalDate, entries: List<EntryOccurrence>, onOpenEntry: (Entry) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    OutlinedCard(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text(if (date == today) "Eventos de hoy" else "Eventos del ${date.label()}",
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    val dateFormat = remember { DateTimeFormatter.ofPattern("EEE, d 'de' MMM", spanish) }
+    OutlinedCard(Modifier.fillMaxWidth().padding(top = 5.dp), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (date == today) "Eventos de hoy" else "Eventos del día",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(date.format(dateFormat).replaceFirstChar { it.uppercase() },
+                        style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                }
+                Text(
+                    if (entries.size == 1) "1 evento" else "${entries.size} eventos",
+                    Modifier.background(colors.surfaceContainerHigh, RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
             if (entries.isEmpty()) {
                 Text("No hay eventos para este día.", style = MaterialTheme.typography.bodySmall)
             }
-            entries.forEach { (item, _) ->
+            entries.forEachIndexed { index, (item, _) ->
+                if (index > 0) HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.5f))
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 26.dp).clickable { onOpenEntry(item) },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(item.time.ifEmpty { "Sin hora" }, Modifier.widthIn(min = 48.dp),
-                        color = colors.primary, style = MaterialTheme.typography.labelMedium)
+                    Text(item.time.ifEmpty { "Sin hora" },
+                        Modifier.widthIn(min = 52.dp).background(lerp(colors.surface, colors.primary, 0.15f), RoundedCornerShape(5.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                        color = colors.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     EntryDot(item.kind, 11.dp, showMark = true)
                     Text(
                         item.title,
@@ -789,7 +868,7 @@ private fun AppointmentsScreen(entries: List<Entry>, onDelete: (String) -> Unit)
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        item { Text("Citas", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+        item { Text("Eventos", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
         if (itemsByDate.isEmpty()) {
             item { Text("No hay citas, exámenes, actividades ni recordatorios.", color = colors.onSurfaceVariant) }
         }
