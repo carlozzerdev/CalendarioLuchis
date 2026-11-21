@@ -229,6 +229,7 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
         else d.entries.asSequence().filterNot { it.archived }.flatMap { it.occurrences(date, date) }
             .sortedWith(byTime).toList()
     }
+    val fixedEntries = remember(d.entries) { d.entries.filter { it.isFixed && !it.archived } }
     val colors = MaterialTheme.colorScheme
     val dark = colors.surface.luminance() < 0.5f
     val accent = if (dark) Color(0xFFFFB58A) else Color(0xFFAE4713)
@@ -321,7 +322,8 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                             }
                         }
                     }
-                    SelectedDayEvents(date, today, dayEntries) { entry = it }
+                    if (fixedEntries.isNotEmpty()) FixedEvents(fixedEntries) { entry = it }
+                    SelectedDayEvents(date, today, dayEntries.filterNot { it.entry.isFixed }) { entry = it }
                 }
             }
         } else {
@@ -355,7 +357,8 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
                     date = date.toString(),
                     exam = kind == EntryKind.EXAM,
                     activity = kind == EntryKind.ACTIVITY,
-                    notice = kind == EntryKind.REMINDER
+                    notice = kind == EntryKind.REMINDER,
+                    fixed = false
                 )
             },
             onEditCustody = { editDay = true }
@@ -364,7 +367,7 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
     listNotices?.let { notices ->
         val kind = if (notices) EntryKind.REMINDER else EntryKind.APPOINTMENT
         val entries = d.entries.filter { it.kind == kind }.sortedWith(
-            compareBy<Entry> { it.archived }.thenByDescending { it.notice && it.pinned }.thenBy { it.date + it.time }
+            compareBy<Entry> { it.archived }.thenByDescending { it.isFixed }.thenBy { it.date + it.time }
         )
         AlertDialog(
             onDismissRequest = { listNotices = null },
@@ -391,7 +394,7 @@ internal val weekdays = listOf("Lunes","Martes","Miércoles","Jueves","Viernes",
             confirmButton = {
                 TextButton(onClick = {
                     listNotices = null
-                    entry = Entry(title = "", date = if (notices) "" else date.toString(), notice = notices)
+                    entry = Entry(title = "", date = if (notices) "" else date.toString(), notice = notices, fixed = false)
                 }) { Text(if (notices) "Nuevo recordatorio" else "Nueva cita") }
             },
             dismissButton = { TextButton(onClick = { listNotices = null }) { Text("Cerrar") } }
@@ -523,6 +526,35 @@ private fun DayDetailsSheet(
                 Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Editar custodia")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FixedEvents(entries: List<Entry>, onOpenEntry: (Entry) -> Unit) {
+    OutlinedCard(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Outlined.PushPin, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Fijados", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            }
+            entries.forEach { item ->
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 28.dp).clickable { onOpenEntry(item) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    EntryDot(item.kind, 11.dp, showMark = true)
+                    Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    val date = item.date.takeIf { it.isNotEmpty() }?.let(LocalDate::parse)
+                    Text(
+                        listOfNotNull(date?.format(DateTimeFormatter.ofPattern("d MMM", spanish)) ?: "Sin fecha",
+                            item.time.takeIf { it.isNotEmpty() }).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -843,10 +875,23 @@ private fun AppointmentsScreen(entries: List<Entry>, onDelete: (String) -> Unit)
 
 @Composable private fun EntryEditor(original:Entry,dismiss:()->Unit,save:(Entry)->Unit,delete:()->Unit) {
     var e by remember { mutableStateOf(original) }; var error by remember { mutableStateOf("") }; var confirmDelete by remember { mutableStateOf(false) }
-    Editor(e.kind.label,dismiss,{ try { CalendarEngine.validate(CalendarData(entries=listOf(e))); require(e.notice || e.date.isNotBlank());save(e) } catch(ex:Exception){error="Revisa título, fecha, hora y duración"} }) {
+    Editor(e.kind.label, dismiss, {
+        if (!e.notice && !e.isFixed && e.date.isBlank()) {
+            error = "Elige una fecha o marca Fijar en calendario."
+        } else {
+            try {
+                CalendarEngine.validate(CalendarData(entries = listOf(e)))
+                save(e)
+            } catch (ex: Exception) {
+                error = "Revisa título, fecha, hora y duración"
+            }
+        }
+    }) {
         Field("Título",e.title){e=e.copy(title=it)}
-        DateField(if(e.notice) "Fecha opcional del recordatorio" else "Fecha",e.date){e=e.copy(date=it)}
-        if(e.notice && e.date.isNotEmpty()) TextButton(onClick={e=e.copy(date="",reminder=-1,repeatWeekly=false)}){Text("Quitar fecha")}
+        Toggle("Fijar en calendario", e.isFixed) { e = e.copy(fixed = it) }
+        val dateOptional = e.notice || e.isFixed
+        DateField(if(dateOptional) "Fecha opcional" else "Fecha",e.date){e=e.copy(date=it)}
+        if(dateOptional && e.date.isNotEmpty()) TextButton(onClick={e=e.copy(date="",reminder=-1,repeatWeekly=false)}){Text("Quitar fecha")}
         if(e.date.isNotEmpty()) {
             val c=LocalContext.current
             OutlinedButton(onClick={
@@ -877,7 +922,6 @@ private fun AppointmentsScreen(entries: List<Entry>, onDelete: (String) -> Unit)
         }
         if(!e.notice) {Field("Duración en minutos (opcional)",e.duration){e=e.copy(duration=it)};Field("Lugar",e.place){e=e.copy(place=it)}}
         Field("Notas",e.notes){e=e.copy(notes=it)}
-        if(e.notice) Toggle("Fijar en calendario",e.pinned){e=e.copy(pinned=it)}
         Toggle("Archivado",e.archived){e=e.copy(archived=it)}
         if(original.title.isNotBlank()) TextButton(onClick={confirmDelete=true}){Text("Eliminar",color=MaterialTheme.colorScheme.error)}
         if(error.isNotEmpty()) Text(error,color=MaterialTheme.colorScheme.error)

@@ -7,7 +7,11 @@ import java.util.UUID
 data class Templates(val since: String = "1900-01-01", val away: List<Int> = listOf(1,0,0,6,1,0,0), val together: List<Int> = listOf(6,7,1,6,7,7,7))
 data class Restart(val monday: String, val together: Boolean)
 data class Holiday(val id: String = UUID.randomUUID().toString(), val title: String, val start: String, val startHalf: Int = 0, val end: String, val endHalf: Int = 2, val mask: Int = 7)
-data class Entry(val id: String = UUID.randomUUID().toString(), val title: String, val date: String = "", val time: String = "", val duration: String = "", val place: String = "", val notes: String = "", val reminder: Int = -1, val notice: Boolean = false, val pinned: Boolean = true, val archived: Boolean = false, val exam: Boolean = false, val activity: Boolean = false, val repeatWeekly: Boolean = false) {
+data class Entry(val id: String = UUID.randomUUID().toString(), val title: String, val date: String = "", val time: String = "", val duration: String = "", val place: String = "", val notes: String = "", val reminder: Int = -1, val notice: Boolean = false, val pinned: Boolean = true, val archived: Boolean = false, val exam: Boolean = false, val activity: Boolean = false, val repeatWeekly: Boolean = false, val fixed: Boolean? = null) {
+    // In older backups, pinned applied only to reminders.
+    internal val isFixed: Boolean
+        get() = fixed ?: (notice && pinned)
+
     internal val kind: EntryKind
         get() = when {
             notice -> EntryKind.REMINDER
@@ -119,7 +123,8 @@ object CalendarEngine {
                 if (e.time.isNotEmpty()) java.time.LocalTime.parse(e.time)
             }
             require(e.reminder < 0 || (e.date.isNotEmpty() && e.time.isNotEmpty()))
-            require(!(e.exam || e.activity || e.repeatWeekly) || e.date.isNotEmpty())
+            require(!e.repeatWeekly || e.date.isNotEmpty())
+            require(!(e.exam || e.activity) || e.date.isNotEmpty() || e.isFixed)
             require(e.duration.isEmpty() || e.duration.toInt() > 0)
         }
         require(d.entries.map { it.id }.distinct().size == d.entries.size)

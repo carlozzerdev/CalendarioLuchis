@@ -70,6 +70,13 @@ fun main() {
         BackupCodec.decode(encoded).entries.map { it.kind } == EntryKind.entries &&
             BackupCodec.decode(encoded.replace(",\"exam\":false", "")).entries == data.entries
     }
+    verify("Un examen fijado puede guardarse sin fecha") {
+        val exam = Entry(title = "Preparar mates", exam = true, fixed = true)
+        val restored = BackupCodec.decode(BackupCodec.encode(base.copy(entries = listOf(exam)))).entries.single()
+        restored.isFixed && restored.date.isEmpty() &&
+            !Entry(title = "Cita antigua", pinned = true).isFixed &&
+            Entry(title = "Aviso antiguo", notice = true, pinned = true).isFixed
+    }
     verify("Una actividad sin hora se repite cada siete días desde la fecha inicial") {
         val drawing = Entry(title = "Dibujo", date = "2026-11-20", activity = true, repeatWeekly = true)
         val restored = BackupCodec.decode(BackupCodec.encode(base.copy(entries = listOf(drawing)))).entries.single()
